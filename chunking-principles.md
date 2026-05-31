@@ -13,6 +13,7 @@ In this document, we will, in general, refer to chunking using terminology that 
 
 As this document is intended for the NPCP, we will also assume users are familiar with the `xarray` data model, which is similarly ubiquitous in modern analysis workflows.
 
+In the interests of brevity, we will not consider codecs, compression, or anything like that. They are all important considerations too and chunking plays a role in their effectiveness, but we would like this document to end eventually.
 
 ___
 
@@ -61,6 +62,41 @@ Let's assume we have a chunked dataset, with a couple of simplifying assumptions
 
 When `xarray` opens this file, it creates a dask array for the variable, with one dask chunk for each disk chunk. This means that for each disk chunk, there will be a corresponding in-memory numpy array.
 
+Imagine now that we want to open the 'first' chunk of the dataset, and select a subset of it. This whole operation occurs in three parts:
+1. Open the chunked dataset, and read the metadata in order to determine the chunking scheme.
+2. Read the entirety of the first chunk from disk into memory.
+3. Discard the parts of the chunk which are irrelevant to our selection.
 
+From this, we can infer a couple of important principles:
+1. Ideally, we do not want our disk chunks to be much larger than the typical size of a selection that a user might make. If they are, then users will be forced to read large chunks of data into memory, only to discard most of it. 
+2. If we want to support efficient selection of small subsets of the data, we need to ensure that our disk chunks are small enough to allow for this. 
+3. If our dask chunks are not well aligned with our disk chunks - for example, a dask chunk spans only half a disk chunk - then we will be forced to read the decode the disk chunk twice in order to write it into two separate dask chunks. IO is typically *the largest bottleneck* in analysis workflows, and so this is a situation we want to avoid.
+
+### Principle: Disk chunks should be small enough to allow for efficient selection of small subsets of the data, and dask chunks should be an integer multiple of disk chunks in order to avoid unnecessary IO overhead.
+
+___
+___
+
+## Rechunking: It is cheaper to combine than split chunks
+
+Consider two 'orthogonal' analysis workflows: one which generates a map, and one which generates a time series.
+- The map workflow is optimised by chunking the data along the time dimension, so that each chunk contains the full spatial domain of the data, but only a single slice of time.
+- The time series workflow is optimised by chunking the data along the spatial dimensions, so that each chunk contains a single point in space, but the full time domain of the data.
+
+This can be visualised as a 'pancakes to churros' or 'burgers to hotdogs' scenario:
+
+```
++-------------------+
+|                   |
++-------------------+
+|                   |
++-------------------+
+|                   |
++-------------------+
+|                   |
++-------------------+
+|                   |
++-------------------+
+```
 
 
