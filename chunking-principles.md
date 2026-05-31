@@ -86,17 +86,100 @@ Consider two 'orthogonal' analysis workflows: one which generates a map, and one
 This can be visualised as a 'pancakes to churros' or 'burgers to hotdogs' scenario:
 
 ```
-+-------------------+
-|                   |
-+-------------------+
-|                   |
-+-------------------+
-|                   |
-+-------------------+
-|                   |
-+-------------------+
-|                   |
-+-------------------+
+ +-------------------+      +-------------------+           
+ |                   |      |    |    |    |    |                            
+ +-------------------+      +    |    |    |    +                            
+ |                   |      |    |    |    |    |                            
+ +-------------------+      +    |    |    |    +                            
+ |                   |  ->  |    |    |    |    |    
+ +-------------------+      +    |    |    |    +                            
+ |                   |      |    |    |    |    |                            
+ +-------------------+      +    |    |    |    +                            
+ |                   |      |    |    |    |    |                            
+ +-------------------+      +-------------------+                            
 ```
 
+As a concrete example of this, consider a workflow where we wish to produce timeseries optimised chunks from map optimised chunks - as illustrated above.
 
+In such a scenario, we would need to either:
+a. Read the entire dataset into a single dask chunk (numpy array) in memory, and then split it into smaller chunks.
+b. Read each chunk repeatedly from disk, and write it into the appropriate dask chunks on disk. For example, to prodfuce the first churro, we might need to read the first pancake, write the first 10% of it into the first churro, then read the second pancake, write the first 10% of it into the first churro, and so on until we have read all pancakes and written the first churro. We would then repeat this process for each subsequent churro.
+
+
+Now consider an isotropically chunked dataset. We can produce either pancakes, or churros, purely by combining chunks: it it not necessary to split any chunks, nor 'overread' any chunks. This is illustrated in the following diagrams:
+
+```
++---+---+---+---+---+        +-------------------+            
+|   |   |   |   |   |        |    |    |    |    |                             
++---+---+---+---+---+        +    |    |    |    +                             
+|   |   |   |   |   |        |    |    |    |    |                             
++---+---+---+---+---+        +    |    |    |    +                             
+|   |   |   |   |   |    ->  |    |    |    |    |     
++---+---+---+---+---+        +    |    |    |    +                             
+|   |   |   |   |   |        |    |    |    |    |                             
++---+---+---+---+---+        +    |    |    |    +                             
+|   |   |   |   |   |        |    |    |    |    |                             
++---+---+---+---+---+        +-------------------+                             
+```
+```
++---+---+---+---+---+         +-------------------+
+|   |   |   |   |   |         |                   |
++---+---+---+---+---+         +-------------------+
+|   |   |   |   |   |         |                   |
++---+---+---+---+---+         +-------------------+
+|   |   |   |   |   |    ->   |                   |
++---+---+---+---+---+         +-------------------+
+|   |   |   |   |   |         |                   |
++---+---+---+---+---+         +-------------------+
+|   |   |   |   |   |         |                   |
++---+---+---+---+---+         +-------------------+
+```
+
+In this sense, although the isotropically chunked dataset is suboptimal for both workflows, it is the least suboptimal for both workflows, and therefore represents the optimal chunking scheme for an unknown use case.
+
+*Question: Typically, it is common to produce either maps **or** timeseries. Combination plots such as Hoevmuller plots are less common.  Therefore, it stands to reason that our notion of isotropic chunks ought to consider latitude and longitude to be somewhat entangled, and weighted together somehow. A mathematically pure notion of this currently escapes me, but I think it should involve square roots somehow.*
+
+---
+---
+
+## Why not tiny disk chunks?
+
+As with dask chunks, smaller disk chunks require additional coordination overhead. This also happens unavoidably at an IO/filesystem level. Each chunk is compressed individually, and so one decompression operation is required per chunk. Smaller chunks therefore require, amongst other things, more decompression operations, increasing overhead.
+
+### Principle: The best chunking for a given operation are the largest chunks that do not cause us to over-read from disk, or exceed our memory constraints. To accomodate for multiple possible use cases, we should aim to produce the largest chunks that are still small enough to allow for efficient selection of small subsets of the data, and that can comfortably fit into memory on reasonably anticipated hardware.
+
+___
+___
+
+## Considering the whole dataset: Chunks and Files
+
+So far, we have only discussed chunking at a within-file level. However, as we have already noted, climate datasets are typically not contained within a single file, but are instead written out as a series of files. Each file typically contains the full spatial domain of the data, but only a subset of the time domain.
+
+Crucially, we can think of files themselves as a chunk. 
+
+When choosing isotropic chunking schemes, this becomes important. Climate models are numerical integrations, and so typically written out in terms of time slices - one month of data per file, for example. 
+
+If we then try to create a chunking scheme that is isotropic at a within-file level, we may end up with a chunking scheme that is highly anisotropic at the whole dataset level. For example, if we have a dataset that is 360x180x50 (lon x lat x time), and we write it out as 5 files of 360x180x10, then we might choose to chunk each file into chunks of size 36x18x1. This would be isotropic at the within-file level, with ten chunks per dimension, but at the whole dataset level, we would have ten chunks per spatial dimension, but 50 in time. 
+
+This seems highly anisotropic - we have many more chunks in time than in space. However, as we have 5 files, there is no way to have fewer than 5 chunks in time. Therefore, the 'best' we can do is to have 5 chunks in time, and 10 chunks in each spatial dimension. This is still reasonably isotropic, and is likely to be the optimal chunking scheme for an unknown use case.
+
+### Principle: Files *are* chunks, and cannot be ignored. Chunking schemes must take these 'file chunks' into account, as they are less mutable than disk chunk, and so are a stronger constraint on the optimal chunking scheme.
+
+___
+___
+
+## Future Proofing: Avoiding Zarr-incompatible chunking schemes for virtualisation
+
+Historically, climate model output has typically been written as netCDF. However, netCDF fares extremely poorly on cloud storage, due to assumptions which only hold on local filesystem storage.
+
+Zarr is a modern, cloud optimised data format, which takes the notion of a dataset being comprised of multiple files, and extends that to the chunk level. A zarr store is a hierarchial directory tree, with separated metadata and a file for each chunk (or a group of chunks, known as sharding). However, this file format has historically fared poorly on HPC systems, as it creates large numbers of inodes unless sharding (unavailable prior to zarr v3) in used.
+
+In the zarr data model, a large, multi-file netCDF dataset is represented by a single zarr store. The developers of zarr, noting that copying archival, multi PB datasets to zarr is prohibitively expensive, devloped a set of technologies known as virtualisation. Virtualisation takes a group of netCDF files, and creates a zarr store which indexes byte ranges within those files in order to directly access individual chunks.
+
+This has a wide range of performance benefits and enables the used of Zarr's cloud optimised features and burgeoning ecosystem with netCDF datasets. However, it requires that the dataset being virtualised respects the zarr data model. In particular, for a multi file dataset, it requires that the chunking scheme for the combined dataset can be represented as a *rectilinear chunk grid*. This can require particular care when choosing chunking schemes for multi-file datasets, as it is easy to end up with a chunking scheme that is incompatible with virtualisation, and therefore cannot be easily converted to virtual zarr in the future.
+
+As a simple example, consider the following: daily data, written at monthly frequency. This *cannot* be virtualised, as the chunking scheme in time will be (31, 28, 31, 30 ...) for the different files, and so cannot be represented as a rectilinear chunk grid.
+
+For a calendar without leap years, this can easily be solved by writing out data at either a daily, 73 day, or yearly frequency: these all produce rectilinear chunk grids. For a calendar with leap years, the implementation is more complex, but the principles are the same.
+
+### Principle: Combining file chunks in a way which produces variable chunk lengths prohibits future virtualisation. Avoid wherever possible.
