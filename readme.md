@@ -138,9 +138,6 @@ Now consider an isotropically chunked dataset. We can produce either pancakes, o
 
 In this sense, although the isotropically chunked dataset is suboptimal for both workflows, it is the least suboptimal for both workflows, and therefore represents the optimal chunking scheme for an unknown use case.
 
-*Question: Typically, it is common to produce either maps **or** timeseries. Combination plots such as Hoevmuller plots are less common.  Therefore, it stands to reason that our notion of isotropic chunks ought to consider latitude and longitude to be somewhat entangled, and weighted together somehow. A mathematically pure notion of this currently escapes me, but I think it should involve square roots somehow.*
-
-*TMOORE COMMENT: Is it not true that by the time you are making a hoevmuller plot you have likely already reduced your data down to where it might all sit in memory?  Other than that possibly unhelpful comment I'm not sure how to answer your question.  I'd suggest that current best-practice for "climate data" is planning for either space or time chunked analysis-ready data only, as a start?*
 
 ---
 ---
