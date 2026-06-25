@@ -71,7 +71,7 @@ Imagine now that we want to open the 'first' chunk of the dataset, and select a 
 From this, we can infer a couple of important principles:
 1. Ideally, we do not want our disk chunks to be much larger than the typical size of a selection that a user might make. If they are, then users will be forced to read large chunks of data into memory, only to discard most of it. 
 2. If we want to support efficient selection of small subsets of the data, we need to ensure that our disk chunks are small enough to allow for this. 
-3. If our dask chunks are not well aligned with our disk chunks - for example, a dask chunk spans only half a disk chunk - then we will be forced to read the decode *>> TMOORE comment: do you mean "read and decode"? <<* the disk chunk twice in order to write it into two separate dask chunks. IO is typically *the largest bottleneck* in analysis workflows, and so this is a situation we want to avoid.
+3. If our dask chunks are not well aligned with our disk chunks - for example, a dask chunk spans only half a disk chunk - then we will be forced to read and decode the disk chunk twice in order to write it into two separate dask chunks. IO is typically *the largest bottleneck* in analysis workflows, and so this is a situation we want to avoid.
 
 ### Principle: Disk chunks should be small enough to allow for efficient selection of small subsets of the data, and dask chunks should be an integer multiple of disk chunks in order to avoid unnecessary IO overhead.
 
