@@ -64,6 +64,8 @@ So disk chunks should satisfy two goals:
 - be small enough to support efficient selection of common subsets
 - compose cleanly into dask chunks, ideally as integer multiples
 
+In practice, this usually means erring toward fairly small disk chunks. They do not need to be tiny, but they should usually be small enough that downstream users can combine them flexibly into dask chunks on modest hardware.
+
 **Principle:** disk chunks should be small enough for efficient subset access, and dask chunks should be integer multiples of disk chunks wherever possible.
 
 ## Principle 3: it is cheaper to combine chunks than split them
@@ -82,7 +84,50 @@ Moving from one extreme to the other is expensive if existing chunks have to be 
 
 Combining chunks is much cheaper than splitting them.
 
-This is why an **isotropic** chunking scheme is often a good compromise. It is not usually optimal for any one workflow, but it is often easier to recombine into more specialised layouts later.
+This can be visualised as a 'pancakes to churros' problem:
+
+```
+ +-------------------+      +-------------------+
+ |                   |      |    |    |    |    |
+ +-------------------+      +    |    |    |    +
+ |                   |      |    |    |    |    |
+ +-------------------+      +    |    |    |    +
+ |                   |  ->  |    |    |    |    |
+ +-------------------+      +    |    |    |    +
+ |                   |      |    |    |    |    |
+ +-------------------+      +    |    |    |    +
+ |                   |      |    |    |    |    |
+ +-------------------+      +-------------------+
+```
+
+This is why an **isotropic** chunking scheme is often a good compromise. It is not usually optimal for any one workflow, but it is often easier to recombine into more specialised layouts later:
+
+```
++---+---+---+---+---+        +-------------------+
+|   |   |   |   |   |        |    |    |    |    |
++---+---+---+---+---+        +    |    |    |    +
+|   |   |   |   |   |        |    |    |    |    |
++---+---+---+---+---+        +    |    |    |    +
+|   |   |   |   |   |    ->  |    |    |    |    |
++---+---+---+---+---+        +    |    |    |    +
+|   |   |   |   |   |        |    |    |    |    |
++---+---+---+---+---+        +    |    |    |    +
+|   |   |   |   |   |        |    |    |    |    |
++---+---+---+---+---+        +-------------------+
+```
+```
++---+---+---+---+---+         +-------------------+
+|   |   |   |   |   |         |                   |
++---+---+---+---+---+         +-------------------+
+|   |   |   |   |   |         |                   |
++---+---+---+---+---+         +-------------------+
+|   |   |   |   |   |    ->   |                   |
++---+---+---+---+---+         +-------------------+
+|   |   |   |   |   |         |                   |
++---+---+---+---+---+         +-------------------+
+|   |   |   |   |   |         |                   |
++---+---+---+---+---+         +-------------------+
+```
 
 **Principle:** for an unknown use case, prefer chunking schemes that are easy to recombine, because rechunking by combining is much cheaper than rechunking by splitting.
 
@@ -97,7 +142,9 @@ This gives a second balancing act:
 - chunks should be small enough to avoid excessive over-reading
 - chunks should be large enough to avoid excessive per-chunk overhead
 
-**Principle:** the best chunking for a given workflow is usually the largest chunking scheme that does not create unacceptable over-reading or memory pressure.
+In practice, that usually means erring a bit small rather than a bit large. A few-megabyte disk chunk is often a more forgiving starting point than a very large one, because users can combine small chunks later more easily than they can undo over-large chunks.
+
+**Principle:** the best chunking for a given workflow is usually the largest chunking scheme that does not create unacceptable over-reading or memory pressure. However, when in doubt, err on the side of somewhat smaller disk chunks rather than larger ones.
 
 ## Principle 5: files are chunks too
 
