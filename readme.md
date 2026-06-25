@@ -1,20 +1,20 @@
 # Principles for chunking climate model output
 
-This is a draft document aiming to provide some general guidance on deciding chunking for climate model output. There is little intent here to be prescriptive: instead, we aim to provide a set of general principles climate modellers can apply when writing outputs.
+This draft offers general guidance on choosing chunking schemes for climate model output. It is not intended to be prescriptive. The goal is to set out a small number of principles that climate modellers can apply when writing data.
 
-In this document, there are a few overarching principles that we think are important to consider:
+A few overarching ideas matter throughout:
 
-- Climate datasets produced from the output of a model run are generally not contained within a single netCDF file. Instead, they are typically written out as a series of files, often containing the full spatial domain but for a subset of the time domain. Files are not often considered to be a chunk in the typical sense, but represent a fundamental unit of storage and chunking. We aim to describe our principles here at a within-file level, but it is important to consider the structure of the files themselves.
-- There is **no such thing as a perfect or optimal chunk scheme**. The optimal chunking scheme for a dataset is fundamentally dependent on the intended analysis to be performed on that dataset. For example, chunking a dataset optimally for producing maps will result in the least optimal chunk scheme for producing time series, and vice versa.
-- In this document, we may occasionally refer to 'optimal chunking'. More precisely, what we mean by optimal chunking is the least suboptimal chunking for an unknown use case. That is, we are not trying to optimise chunking for a specific use case, but instead trying to find a chunking scheme that is likely to be reasonably performant for a wide range of use cases.
-- Data producers / publishers should always consider the current best-practice for changing the chunking scheme (rechunking) of the primary climate model output into chunks that are optimal for specific, common use cases.  These 'analysis-ready' data archives may be generated either by other end-users or the producers / publishers themselves in the future.  Avoid, if at all possible, primary chunking schemes that make rechunking needlessly difficult on the currently available HPC architecture.
-- Different file formats (eg. netCDF, HDF, Zarr) have different limitations on how they may chunk data. We will endeavour to provide guidance that is applicable across file formats. However, it is important to note that Zarr and virtualisation technologies require more prescriptive/less flexible chunking schemes than can be created via the concatenation of netCDF files. We will, as a hard rule, avoid recommending chunking schemes that are incompatible with Zarr and virtualisation. This is necessary to ensure the future proofing of datasets, and to ensure that they can be easily converted to Zarr if desired.
+- Climate datasets from model output are rarely contained in a single netCDF file. They are usually written as a series of files, often covering the full spatial domain but only part of the time domain. Files are not usually described as chunks, but they are still a fundamental unit of storage. We focus mostly on within-file chunking here, while keeping file structure in view.
+- There is **no single perfect chunking scheme**. What is best depends on the intended analysis. A scheme that is ideal for map-making will usually be poor for time-series extraction, and vice versa.
+- When we refer to 'optimal chunking', we really mean the least suboptimal scheme for an unknown use case. We are not trying to optimise for one exact workflow, but to choose a scheme that is likely to perform reasonably well across many workflows.
+- Data producers and publishers should keep rechunking in mind. Specific, common use cases may later justify analysis-ready archives with different chunking. Where possible, avoid primary chunking schemes that make future rechunking needlessly painful on current HPC systems.
+- Different file formats (e.g. netCDF, HDF, Zarr) impose different constraints on chunking. We aim to give guidance that applies across formats, while recognising that Zarr and virtualisation are less flexible than a concatenated set of netCDF files. As a hard rule, we avoid recommending chunking schemes that are incompatible with Zarr and virtualisation, to help future-proof datasets.
 
-In this document, we will, in general, refer to chunking using terminology that is common to analysis workflows. These are typically in Python in modern workflows. The `dask` library is ubiquitous when working with local chunked datasets, and so we use it as our reference implementation of chunking.
+Throughout, we use the language of modern analysis workflows, which in practice usually means Python. The `dask` library is ubiquitous when working with chunked datasets, so we use it as our reference implementation for chunking.
 
-As this document is intended for the NPCP, we will also assume users are familiar with the `xarray` data model, which is similarly ubiquitous in modern analysis workflows.
+Because this document is intended for the NPCP, we also assume readers are familiar with the `xarray` data model.
 
-In the interests of brevity, we will not consider codecs, compression, or anything like that. They are all important considerations too and chunking plays a role in their effectiveness, but are out of scope for this document.
+For brevity, we do not cover codecs or compression here. They matter, and chunking affects them, but they are outside the scope of this document.
 
 ___
 
@@ -32,23 +32,23 @@ ___
 
 ## Chunking - the 30,000 foot view
 
-When opening a chunked dataset with `xarray` and `dask`, the opening of a dataset typically looks something like the following:
-1. `xarray` reads the header data from the file(s) to understand the structure of the dataset, including the variables, dimensions, and attributes. This is typically a very fast operation, as the header data is small and can be read quickly.
-2. `xarray` creates a `dask` array for each variable in the dataset, using the chunking scheme defined in the file(s). This involves creating a `dask` array that is composed of many smaller chunks, each of which corresponds to an integer number of chunks on disk along each dimension.
-3. If multiple files are opened, xarray concatenates the `dask` arrays from each file along the appropriate dimension(s) to create a single `dask` array for each variable that represents the entire dataset. 
-4. The user specifies an analysis to be performed on the dataset. In the background, xarray and dask build a 'task graph', a graph which describes the series of computations that must be performed in order to compute the analysis the user has described.
-5. When the user calls `.compute()` on the result of their analysis, `dask` executes the task graph, which involves reading the necessary chunks from disk, performing the necessary computations in memory, and creates the final result.
+When a chunked dataset is opened with `xarray` and `dask`, the workflow usually looks something like this:
+1. `xarray` reads the header data from the file(s) so it can understand the variables, dimensions, and attributes. This is usually fast because the header is small.
+2. `xarray` creates a `dask` array for each variable, using the chunking scheme defined in the file(s). Each dask chunk corresponds to an integer number of on-disk chunks along each dimension.
+3. If multiple files are opened, `xarray` concatenates those arrays along the appropriate dimension(s) to produce one logical array per variable for the whole dataset.
+4. The user specifies an analysis. In the background, `xarray` and `dask` build a task graph describing the computations needed to produce that result.
+5. When the user calls `.compute()`, `dask` executes that graph: reading the needed chunks from disk, performing the computations in memory, and producing the final result.
 
 ### Executing the task graph
 
-Let's first consider computation on a single dask chunk. Fundamentally, each dask chunk corresponds to a numpy array. The whole dask chunk is realised into memory as a single array, and so the entire numpy array corresponding to that chunk must, at the very least, fit into the total available system memory. This provides *the most conservative upper bound* on the size of a dask chunk. Put simply, a laptop with 8GB of RAM cannot process a dask chunk that is larger than 8GB. In practice, the maximum size of a dask chunk is likely to be much smaller than the total available memory, as the system needs to allocate memory for other processes, and the analysis being performed may require multiple dask chunks to be loaded into memory at the same time.
+Start with computation on a single dask chunk. Each dask chunk ultimately corresponds to a NumPy array. That whole array must be realised in memory, so the chunk must fit within the available system memory. This gives a conservative upper bound on dask chunk size. Put simply: a laptop with 8 GB of RAM cannot process a dask chunk larger than 8 GB. In practice, the usable limit is much lower, because memory is also needed for other processes, overheads, and often multiple dask chunks at once.
 
 > [!TIP]
 > The example choice of a laptop with 8GB of RAM here is not purely coincidental. The optimal dask chunk choice may be much larger for, e.g., a megamem ARE session with 192GB of RAM than on a personal laptop. As dask chunks should be an integer multiple of disk chunks, it is important that disk chunks are small enough that they can comfortably fit into memory on all reasonably anticipated hardware.
 
 ### Combining Chunks
 
-In order to perform an analysis, dask must build a **task graph**, which it then uses to combine the results of each dask chunk computation into the final result. Each node in the task graph represents an operation on a single dask chunk. Each edge in the graph represents a dependency between operations on two dask chunks. The smaller the dask chunks, the more nodes and edges there will be in the task graph, and the more overhead there will be in executing the task graph. 
+To perform an analysis, dask builds a **task graph** that combines the results of operations on individual chunks into a final result. Each node in that graph represents work on a chunk, and each edge represents a dependency between operations. Smaller dask chunks mean more nodes and edges, and therefore more scheduling overhead.
 
 ### Principle: Larger chunks result in a smaller task graph, and therefore less dask overhead in executing the graph. This comes at the expense of increased memory pressure.
 
@@ -57,16 +57,16 @@ ___
 
 ## A disk chunk is the quanta of storage on disk and a dask chunk is the quanta of computation in memory. 
 
-Let's assume we have a chunked dataset, with a couple of simplifying assumptions:
-- Comprising a single variable
-- We intend to use the same dask and disk chunks. 
+Assume a chunked dataset with two simplifying assumptions:
+- it contains a single variable
+- we use the same dask and disk chunks
 
-When `xarray` opens this file, it creates a dask array for the variable, with one dask chunk for each disk chunk. This means that for each disk chunk, there will be a corresponding in-memory numpy array.
+When `xarray` opens the file, it creates one dask chunk for each disk chunk. Each on-disk chunk therefore maps to one in-memory NumPy array.
 
-Imagine now that we want to open the 'first' chunk of the dataset, and select a subset of it. This whole operation occurs in three parts:
-1. Open the chunked dataset, and read the metadata in order to determine the chunking scheme.
-2. Read the entirety of the first chunk from disk into memory.
-3. Discard the parts of the chunk which are irrelevant to our selection.
+Now imagine opening the 'first' chunk of the dataset and selecting only part of it. That operation has three steps:
+1. Open the dataset and read the metadata to determine the chunking scheme.
+2. Read the entire first chunk from disk into memory.
+3. Discard the part of that chunk that is irrelevant to the selection.
 
 From this, we can infer a couple of important principles:
 1. Ideally, we do not want our disk chunks to be much larger than the typical size of a selection that a user might make. If they are, then users will be forced to read large chunks of data into memory, only to discard most of it. 
@@ -100,14 +100,13 @@ This can be visualised as a 'pancakes to churros' or 'burgers to hotdogs' scenar
  +-------------------+      +-------------------+                            
 ```
 
-As a concrete example of this, consider a workflow where we wish to produce timeseries optimised chunks from map optimised chunks - as illustrated above.
+As a concrete example, consider producing time-series-optimised chunks from map-optimised chunks, as illustrated above.
 
-In such a scenario, we would need to either:
-a. Read the entire dataset into a single dask chunk (numpy array) in memory, and then split it into smaller chunks.
-b. Read each chunk repeatedly from disk, and write it into the appropriate dask chunks on disk. For example, to produce the first churro, we might need to read the first pancake, write the first 10% of it into the first churro, then read the second pancake, write the first 10% of it into the first churro, and so on until we have read all pancakes and written the first churro. We would then repeat this process for each subsequent churro.
+In that scenario, we would need to either:
+a. Read the entire dataset into one dask chunk (NumPy array) in memory, then split it into smaller chunks.
+b. Repeatedly read chunks from disk and write slices of them into the appropriate output chunks. For example, to produce the first churro, we might read the first pancake, write its first 10% into the first churro, then read the second pancake and do the same, and so on until every pancake has contributed to that first churro. We would then repeat the process for each subsequent churro.
 
-
-Now consider an isotropically chunked dataset. We can produce either pancakes, or churros, purely by combining chunks: it is not necessary to split any chunks, nor 'overread' any chunks. This is illustrated in the following diagrams:
+Now consider an isotropically chunked dataset. We can produce either pancakes or churros purely by combining chunks. We do not need to split chunks or over-read them. This is illustrated in the following diagrams:
 
 ```
 +---+---+---+---+---+        +-------------------+            
@@ -153,15 +152,15 @@ ___
 
 ## Considering the whole dataset: Chunks and Files
 
-So far, we have only discussed chunking at a within-file level. However, as we have already noted, climate datasets are typically not contained within a single file, but are instead written out as a series of files. Each file typically contains the full spatial domain of the data, but only a subset of the time domain.
+So far we have discussed chunking within a file. In practice, though, climate datasets are usually written as a series of files rather than a single file. Each file often contains the full spatial domain, but only part of the time domain.
 
-Crucially, we can think of files themselves as a chunk. 
+Crucially, files can themselves be treated as chunks.
 
-When choosing isotropic chunking schemes, this becomes important. Climate models are numerical integrations, and so typically written out in terms of time slices - one month of data per file, for example. 
+This matters when choosing isotropic chunking schemes. Climate models are numerical integrations, so output is often written as time slices, such as one month per file.
 
-If we then try to create a chunking scheme that is isotropic at a within-file level, we may end up with a chunking scheme that is highly anisotropic at the whole dataset level. For example, if we have a dataset that is 360x180x50 (lon x lat x time), and we write it out as 5 files of 360x180x10, then we might choose to chunk each file into chunks of size 36x18x1. This would be isotropic at the within-file level, with ten chunks per dimension, but at the whole dataset level, we would have ten chunks per spatial dimension, but 50 in time. 
+If we aim for isotropy only within each file, we may end up with a highly anisotropic scheme at the whole-dataset level. For example, suppose a dataset is 360x180x50 (lon x lat x time), written as 5 files of 360x180x10. We might chunk each file into 36x18x1. That is isotropic within each file, with ten chunks per dimension, but across the full dataset it yields ten chunks in each spatial dimension and 50 in time.
 
-This seems highly anisotropic - we have many more chunks in time than in space. However, as we have 5 files, there is no way to have fewer than 5 chunks in time. Therefore, the 'best' we can do is to have 5 chunks in time, and 10 chunks in each spatial dimension. This is still reasonably isotropic, and is likely to be the optimal chunking scheme for an unknown use case.
+That looks highly anisotropic. But because there are already 5 files, there is no way to have fewer than 5 chunks in time. So the best we can do may be 5 chunks in time and 10 in each spatial dimension. That is still reasonably isotropic, and is likely to be a sensible choice for an unknown use case.
 
 ### Principle: Files *are* chunks, and cannot be ignored. Chunking schemes must take these 'file chunks' into account, as they are less mutable than disk chunks, and so are a stronger constraint on the optimal chunking scheme.
 
@@ -170,13 +169,13 @@ ___
 
 ## Future Proofing: Avoiding Zarr-incompatible chunking schemes for virtualisation
 
-Historically, climate model output has typically been written as netCDF. However, netCDF fares extremely poorly on cloud storage, due to assumptions which only hold on local filesystem storage.
+Historically, climate model output has usually been written as netCDF. But netCDF performs poorly on cloud storage because it assumes access patterns that make much more sense on a local filesystem.
 
-Zarr is a modern, cloud optimised data format, which takes the notion of a dataset being comprised of multiple files, and extends that to the chunk level. A zarr store is a hierarchical directory tree, with separated metadata and a file for each chunk (or a group of chunks, known as sharding). However, this file format has historically fared poorly on HPC systems, as it creates large numbers of inodes unless sharding (unavailable prior to zarr v3) is used.
+Zarr is a cloud-optimised format that extends the idea of a dataset being split across many files all the way down to the chunk level. A Zarr store is a hierarchical directory tree with separate metadata and a file for each chunk (or for a group of chunks, when sharding is used). Historically, though, Zarr has performed poorly on some HPC systems because it can create huge inode counts unless sharding is available and used.
 
-In the zarr data model, a large, multi-file netCDF dataset is represented by a single zarr store. The developers of zarr, noting that copying archival, multi-PB datasets to zarr is prohibitively expensive, developed a set of technologies known as virtualisation. Virtualisation takes a group of netCDF files, and creates a zarr store which indexes byte ranges within those files in order to directly access individual chunks.
+In the Zarr data model, a large multi-file netCDF dataset can be represented as a single Zarr store. Because copying archival multi-petabyte datasets into Zarr is often prohibitively expensive, the Zarr ecosystem developed a family of approaches known as virtualisation. Virtualisation indexes byte ranges within the original netCDF files so individual chunks can be accessed directly through a Zarr view.
 
-This has a wide range of performance benefits and enables the use of Zarr's cloud-optimised features and burgeoning ecosystem with netCDF datasets. However, it requires that the dataset being virtualised respects the zarr data model. In particular, for a multi-file dataset, it requires that the chunking scheme for the combined dataset can be represented as a *rectilinear chunk grid*. This can require particular care when choosing chunking schemes for multi-file datasets, as it is easy to end up with a chunking scheme that is incompatible with virtualisation, and therefore cannot be easily converted to virtual zarr in the future.
+This brings substantial performance benefits and opens up the wider Zarr ecosystem for netCDF datasets. But it only works if the source dataset can be represented in the Zarr data model. In particular, a multi-file dataset must be representable as a *rectilinear chunk grid*. That means chunking decisions for multi-file datasets need extra care: it is easy to choose a scheme that blocks future virtualisation.
 
 As a simple example, consider the following: daily data, written at monthly frequency. This *cannot* be virtualised, as the chunking scheme in time will be (31, 28, 31, 30 ...) for the different files, and so cannot be represented as a rectilinear chunk grid.
 
