@@ -7,13 +7,14 @@ In this document, there are a few overarching principles that we think are impor
 - Climate datasets produced from the output of a model run are generally not contained within a single netCDF file. Instead, they are typically written out as a series of files, often containing the full spatial domain but for a subset of the time domain. Files are not often considered to be a chunk in the typical sense, but represent a fundamental unit of storage and chunking. We aim to describe our principles here at a within file level, but it is important to consider the structure of the files themselves.
 - There is **no such thing as a perfect or optimal chunk scheme**. The optimal chunking scheme for a dataset is fundamentally dependent on the intended analysis to be performed on that dataset. For example, chunking a dataset optimally for producing maps will result in the least optimal chunk scheme for producing time series, and vice versa.
 - In this document, we may occasionally refer to 'optimal chunking'. More precisely, what we mean by optimal chunking is the least suboptimal chunking for an unknown use case. That is, we are not trying to optimise chunking for a specific use case, but instead trying to find a chunking scheme that is likely to be reasonably performant for a wide range of use cases.
+- Data producers / publishers should always consider the current best-practice for changing the chunking scheme (rechunking) of the primary climate model output into chunks that are optimal for specific, common use cases.  These 'analysis-ready' data archives may be generated either by other end-users or the producers / publishers themselves in the future.  Avoid, if at all possible, primary chunking schemes that make rechunking needlessly difficult on the currently available HPC architecture.
 - Different file formats (eg. netCDF, HDF, Zarr) have different limitations on how they may chunk data. We will endeavour to provide guidance that is applicable across file formats. However, it is important to note that Zarr and virtualisation technologies require more prescriptive/less flexible chunking schemes than can be created via the concatenation of netCDF files. We will, as a hard rule, avoid recommending chunking schemes that are incompatible with Zarr and virtualisation. This is necessary to ensure the future proofing of datasets, and to ensure that they can be easily converted to Zarr if desired.
 
 In this document, we will, in general, refer to chunking using terminology that is common to analyis workflows. These are typically in Python in modern workflows. The `dask` library is ubiquitous when working with local chunked datasets, and so we use it as our reference implementation of chunking.
 
 As this document is intended for the NPCP, we will also assume users are familiar with the `xarray` data model, which is similarly ubiquitous in modern analysis workflows.
 
-In the interests of brevity, we will not consider codecs, compression, or anything like that. They are all important considerations too and chunking plays a role in their effectiveness, but we would like this document to end eventually.
+In the interests of brevity, we will not consider codecs, compression, or anything like that. They are all important considerations too and chunking plays a role in their effectiveness, but are out of scope for this document.
 
 ___
 
@@ -70,7 +71,7 @@ Imagine now that we want to open the 'first' chunk of the dataset, and select a 
 From this, we can infer a couple of important principles:
 1. Ideally, we do not want our disk chunks to be much larger than the typical size of a selection that a user might make. If they are, then users will be forced to read large chunks of data into memory, only to discard most of it. 
 2. If we want to support efficient selection of small subsets of the data, we need to ensure that our disk chunks are small enough to allow for this. 
-3. If our dask chunks are not well aligned with our disk chunks - for example, a dask chunk spans only half a disk chunk - then we will be forced to read the decode the disk chunk twice in order to write it into two separate dask chunks. IO is typically *the largest bottleneck* in analysis workflows, and so this is a situation we want to avoid.
+3. If our dask chunks are not well aligned with our disk chunks - for example, a dask chunk spans only half a disk chunk - then we will be forced to read and decode the disk chunk twice in order to write it into two separate dask chunks. IO is typically *the largest bottleneck* in analysis workflows, and so this is a situation we want to avoid.
 
 ### Principle: Disk chunks should be small enough to allow for efficient selection of small subsets of the data, and dask chunks should be an integer multiple of disk chunks in order to avoid unnecessary IO overhead.
 
@@ -137,7 +138,6 @@ Now consider an isotropically chunked dataset. We can produce either pancakes, o
 
 In this sense, although the isotropically chunked dataset is suboptimal for both workflows, it is the least suboptimal for both workflows, and therefore represents the optimal chunking scheme for an unknown use case.
 
-*Question: Typically, it is common to produce either maps **or** timeseries. Combination plots such as Hoevmuller plots are less common.  Therefore, it stands to reason that our notion of isotropic chunks ought to consider latitude and longitude to be somewhat entangled, and weighted together somehow. A mathematically pure notion of this currently escapes me, but I think it should involve square roots somehow.*
 
 ---
 ---
