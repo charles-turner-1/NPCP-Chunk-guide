@@ -142,7 +142,7 @@ This gives a second balancing act:
 - chunks should be small enough to avoid excessive over-reading
 - chunks should be large enough to avoid excessive per-chunk overhead
 
-In practice, that usually means erring a bit small rather than a bit large. A few-megabyte disk chunk is often a more forgiving starting point than a very large one, because users can combine small chunks later more easily than they can undo over-large chunks.
+In practice, that usually means disk chunks should be **small, but not tiny**. A few-megabyte disk chunk is often a more forgiving starting point than a very large one, because users can combine small chunks later more easily than they can undo over-large chunks.
 
 **Principle:** the best chunking for a given workflow is usually the largest chunking scheme that does not create unacceptable over-reading or memory pressure. However, when in doubt, err on the side of somewhat smaller disk chunks rather than larger ones.
 
