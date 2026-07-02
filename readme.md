@@ -31,6 +31,8 @@ Those are related, but they are not the same thing.
 
 ## Principle 1: dask chunks must fit comfortably in memory
 
+For data providers, this matters because dask chunks are usually formed from one or more on-disk chunks. In other words, disk chunking is not separate from dask chunking: it sets the building blocks from which sensible dask chunks can be assembled.
+
 Each dask chunk ultimately becomes an in-memory NumPy array. So the most basic constraint is that a dask chunk has to fit into available memory.
 
 That upper bound is obvious, but it is not generous. A machine with 8 GB of RAM cannot safely process an 8 GB dask chunk: memory is also needed for overheads, other arrays, and the rest of the system. In practice, usable dask chunks are much smaller than total RAM.
